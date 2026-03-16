@@ -43,6 +43,7 @@ class DocumentRecord(BaseModel):
     name: str
     kind: str
     source_path: str
+    preview_url: str | None = None
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
     status: DocumentStatus = "ready"

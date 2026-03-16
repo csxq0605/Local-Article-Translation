@@ -2,6 +2,7 @@ const state = {
   documents: [],
   activeDocumentId: null,
   pollTimer: null,
+  sourceViewMode: "structured",
 };
 
 const documentList = document.getElementById("documentList");
@@ -13,6 +14,8 @@ const progressBar = document.getElementById("progressBar");
 const errorText = document.getElementById("errorText");
 const sourcePane = document.getElementById("sourcePane");
 const translationPane = document.getElementById("translationPane");
+const sourceStructuredButton = document.getElementById("sourceStructuredButton");
+const sourcePreviewButton = document.getElementById("sourcePreviewButton");
 const translateButton = document.getElementById("translateButton");
 const downloadButton = document.getElementById("downloadButton");
 const deleteButton = document.getElementById("deleteButton");
@@ -45,6 +48,10 @@ function hasTranslatedContent(document) {
       Boolean(block.translated_caption) ||
       (Array.isArray(block.translated_rows) && block.translated_rows.length > 0),
   );
+}
+
+function hasPreview(document) {
+  return Boolean(document?.preview_url);
 }
 
 function renderImageBlock(block, translated) {
@@ -119,6 +126,13 @@ function renderBlocks(blocks, translated) {
       return "";
     })
     .join("");
+}
+
+function renderSourceContent(document) {
+  if (state.sourceViewMode === "preview" && hasPreview(document)) {
+    return `<iframe class="doc-preview-frame" src="${document.preview_url}#view=FitH" title="Original preview"></iframe>`;
+  }
+  return renderBlocks(document?.blocks || [], false);
 }
 
 function getActiveDocument() {
@@ -196,9 +210,18 @@ function updateDocumentList() {
 
 function renderActiveDocument() {
   const activeDocument = getActiveDocument();
+  const previewAvailable = hasPreview(activeDocument);
+  if (!previewAvailable && state.sourceViewMode === "preview") {
+    state.sourceViewMode = "structured";
+  }
+
   translateButton.disabled = !activeDocument;
   downloadButton.disabled = !hasTranslatedContent(activeDocument);
   deleteButton.disabled = !activeDocument;
+  sourceStructuredButton.disabled = !activeDocument;
+  sourcePreviewButton.disabled = !previewAvailable;
+  sourceStructuredButton.classList.toggle("active", state.sourceViewMode === "structured");
+  sourcePreviewButton.classList.toggle("active", state.sourceViewMode === "preview");
   errorText.textContent = activeDocument?.error || "";
   statusText.textContent = formatStatus(activeDocument);
   progressBar.style.width = `${Math.round((activeDocument?.progress || 0) * 100)}%`;
@@ -207,6 +230,7 @@ function renderActiveDocument() {
     activeDocumentName.textContent = "No document selected";
     sourcePane.classList.add("empty-state");
     translationPane.classList.add("empty-state");
+    sourcePane.classList.remove("preview-mode");
     sourcePane.textContent = "Upload a document to inspect its structured source content.";
     translationPane.textContent = "Run translation to render the translated structure here.";
     sessionBadge.classList.add("hidden");
@@ -216,7 +240,8 @@ function renderActiveDocument() {
   activeDocumentName.textContent = activeDocument.name;
   sourcePane.classList.remove("empty-state");
   translationPane.classList.remove("empty-state");
-  sourcePane.innerHTML = renderBlocks(activeDocument.blocks, false);
+  sourcePane.classList.toggle("preview-mode", state.sourceViewMode === "preview" && previewAvailable);
+  sourcePane.innerHTML = renderSourceContent(activeDocument);
   translationPane.innerHTML = renderBlocks(activeDocument.blocks, true);
 
   if (activeDocument.session) {
@@ -406,6 +431,17 @@ fileInput.addEventListener("change", async () => {
   } catch (error) {
     errorText.textContent = error.message;
   }
+});
+
+sourceStructuredButton.addEventListener("click", () => {
+  state.sourceViewMode = "structured";
+  renderActiveDocument();
+});
+
+sourcePreviewButton.addEventListener("click", () => {
+  if (!hasPreview(getActiveDocument())) return;
+  state.sourceViewMode = "preview";
+  renderActiveDocument();
 });
 
 translateButton.addEventListener("click", async () => {

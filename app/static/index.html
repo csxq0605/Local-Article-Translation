@@ -67,7 +67,13 @@
         <section class="panes">
           <div class="pane">
             <div class="pane-header">
-              <h3>Original Structure</h3>
+              <div class="pane-header-row">
+                <h3>Original</h3>
+                <div class="view-toggle" role="group" aria-label="Original view mode">
+                  <button id="sourceStructuredButton" class="toggle-button active" type="button">Structured</button>
+                  <button id="sourcePreviewButton" class="toggle-button" type="button" disabled>Original Preview</button>
+                </div>
+              </div>
             </div>
             <div id="sourcePane" class="pane-body empty-state">Upload a document to inspect its structured source content.</div>
           </div>
