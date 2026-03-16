@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Document Translation Studio</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="eyebrow">LOCAL HOSTED</p>
+          <h1>Document Translation Studio</h1>
+          <p class="brand-copy">Drag and drop multiple `docx / pdf / txt` files. Each document keeps its own translation session.</p>
+        </div>
+
+        <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-controls="fileInput">
+          <input id="fileInput" type="file" accept=".pdf,.docx,.txt" multiple hidden />
+          <span class="dropzone-title">Drop files here</span>
+          <span class="dropzone-subtitle">or click to choose files</span>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-title-row">
+            <h2>Documents</h2>
+            <span id="docCount" class="count-pill">0</span>
+          </div>
+          <div id="documentList" class="document-list"></div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="toolbar">
+          <div class="toolbar-left">
+            <div>
+              <p class="eyebrow">ACTIVE DOCUMENT</p>
+              <h2 id="activeDocumentName">No document selected</h2>
+            </div>
+            <div id="sessionBadge" class="session-badge hidden"></div>
+          </div>
+
+          <div class="toolbar-right">
+            <label class="field">
+              <span>Target language</span>
+              <input id="targetLanguage" type="text" value="Chinese (Simplified)" />
+            </label>
+            <div class="toolbar-actions">
+              <button id="translateButton" class="primary-button" disabled>Translate</button>
+              <button id="downloadButton" class="secondary-button" disabled>Download TXT</button>
+              <button id="deleteButton" class="danger-button" disabled>Delete Record</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="status-strip">
+          <div>
+            <span class="status-label">Status</span>
+            <strong id="statusText">Waiting for upload</strong>
+          </div>
+          <div class="progress-track">
+            <div id="progressBar" class="progress-bar"></div>
+          </div>
+          <div id="errorText" class="error-text"></div>
+        </section>
+
+        <section class="panes">
+          <div class="pane">
+            <div class="pane-header">
+              <h3>Original Structure</h3>
+            </div>
+            <div id="sourcePane" class="pane-body empty-state">Upload a document to inspect its structured source content.</div>
+          </div>
+
+          <div class="pane">
+            <div class="pane-header">
+              <h3>Translated Result</h3>
+            </div>
+            <div id="translationPane" class="pane-body empty-state">Run translation to render the translated structure here.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="documentItemTemplate">
+      <button class="document-item">
+        <span class="document-name"></span>
+        <span class="document-meta"></span>
+      </button>
+    </template>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
