@@ -13,7 +13,10 @@ from .base import image_url, normalize_text
 
 BBox = tuple[float, float, float, float]
 
-CAPTION_PREFIX_RE = re.compile(r"^(fig(?:ure)?\.?|table)\s*(\d+[a-z]?)\b(.*)$", re.IGNORECASE | re.DOTALL)
+CAPTION_PREFIX_RE = re.compile(
+    r"^(fig(?:ure)?\.?|table)\s*((?:\d+[a-z]?|[ivxlcdm]+))\b(.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
 EQUATION_NUMBER_RE = re.compile(r"\((?:[A-Za-z]?\d+(?:\.\d+)?)\)")
 MATH_TOKEN_RE = re.compile(
     r"(?:=|≤|≥|≠|≈|∂|∇|λ|α|β|ρ|μ|π|σ|ω|τ|Δ|×|÷|"
@@ -218,23 +221,41 @@ def is_equation_number_text(item: TextItem) -> bool:
 
 def equation_complexity_score(text: str) -> int:
     compact = normalize_match_text(text)
+    lines = [normalize_match_text(line) for line in text.splitlines() if normalize_match_text(line)]
     score = len(MATH_TOKEN_RE.findall(compact))
     score += compact.count("/")
     score += compact.count("{") + compact.count("}")
     score += compact.count("[") + compact.count("]")
     score += compact.count("_")
+    score += compact.count(";")
+
+    symbol_chars = sum(
+        1
+        for char in compact
+        if not char.isalnum() and not char.isspace() and char not in ",.;:"
+    )
+    score += min(6, symbol_chars // 3)
+
     if BRACE_TOKEN_RE.search(compact):
         score += 2
     if re.search(r"\b[a-zA-Z]\s*[A-Za-z0-9]*\s*=", compact):
         score += 2
+    if re.search(r"\b[xyf]\s+[A-Za-z0-9]", compact, re.IGNORECASE):
+        score += 2
+    if len(lines) >= 2 and any(any(ch.isdigit() for ch in line) for line in lines):
+        score += 1
+    if len(lines) >= 2 and compact.count(";") >= 1:
+        score += 1
     return score
 
 
 def is_equation_component(item: TextItem, page_width: float) -> bool:
     compact = normalize_match_text(item.text)
+    lines = [normalize_match_text(line) for line in item.text.splitlines() if normalize_match_text(line)]
     if not compact:
         return False
-    if is_caption_kind(item) or is_metadata_text(item) or is_tabular_text(item):
+    score = equation_complexity_score(compact)
+    if is_caption_kind(item) or is_metadata_text(item):
         return False
     if is_paragraph_like(item, page_width):
         return False
@@ -242,9 +263,17 @@ def is_equation_component(item: TextItem, page_width: float) -> bool:
         return True
     if BRACE_TOKEN_RE.search(compact):
         return True
-    if item.width > page_width * 0.78 or len(compact) > 180:
+    if is_tabular_text(item) and score < 3:
         return False
-    return equation_complexity_score(compact) >= 3
+    if item.width > page_width * 0.86 or len(compact) > 220:
+        return False
+    if score >= 2 and len(lines) >= 2 and is_centered_equation_item(item, page_width):
+        return True
+    return score >= 3
+
+
+def is_centered_equation_item(item: TextItem, page_width: float) -> bool:
+    return abs(item.center_x - page_width / 2) <= page_width * 0.18
 
 
 def is_header_artifact_media(bbox: BBox, page_width: float, page_height: float) -> bool:
@@ -603,11 +632,66 @@ def split_first_page_preamble(items: list[TextItem], page_width: float) -> tuple
     return preamble, body
 
 
+def is_equation_support_box(box: BBox, equation_bbox: BBox, page_width: float, page_height: float) -> bool:
+    width = box[2] - box[0]
+    height = box[3] - box[1]
+    if width < 4 or height < 4:
+        return False
+    if width > page_width * 0.9 or height > page_height * 0.25:
+        return False
+
+    expanded_bbox = (
+        equation_bbox[0] - 40,
+        equation_bbox[1] - 24,
+        equation_bbox[2] + 40,
+        equation_bbox[3] + 24,
+    )
+    return overlaps(box, expanded_bbox)
+
+
+def expand_equation_bbox(
+    *,
+    page: fitz.Page,
+    bbox: BBox,
+    occupied_boxes: list[BBox],
+    page_width: float,
+    page_height: float,
+) -> BBox:
+    support_boxes: list[BBox] = [bbox]
+
+    for drawing in page.get_drawings():
+        rect = drawing.get("rect")
+        if rect is None:
+            continue
+        box = (rect.x0, rect.y0, rect.x1, rect.y1)
+        if overlaps_any(box, occupied_boxes):
+            continue
+        if is_equation_support_box(box, bbox, page_width, page_height):
+            support_boxes.append(box)
+
+    seen_xrefs: set[int] = set()
+    for image in page.get_images(full=True):
+        xref = image[0]
+        if xref in seen_xrefs:
+            continue
+        seen_xrefs.add(xref)
+        for rect in page.get_image_rects(xref):
+            box = tuple(rect)
+            if overlaps_any(box, occupied_boxes):
+                continue
+            if is_equation_support_box(box, bbox, page_width, page_height):
+                support_boxes.append(box)
+
+    return union_boxes(support_boxes) or bbox
+
+
 def detect_equation_media_items(
     *,
+    page: fitz.Page,
     text_items: list[TextItem],
     occupied_boxes: list[BBox],
     page_width: float,
+    page_height: float,
     page_number: int,
 ) -> tuple[list[MediaItem], set[int]]:
     candidates = [
@@ -649,13 +733,22 @@ def detect_equation_media_items(
         if not has_formula_core:
             continue
         if len(group) == 1 and not is_equation_number_text(group[0]):
-            continue
+            only_item = group[0]
+            if equation_complexity_score(only_item.text) < 4 or not is_centered_equation_item(only_item, page_width):
+                continue
 
         bbox = union_boxes(item.bbox for item in group)
         if bbox is None:
             continue
         if (bbox[2] - bbox[0]) < 80 or (bbox[3] - bbox[1]) < 18:
             continue
+        bbox = expand_equation_bbox(
+            page=page,
+            bbox=bbox,
+            occupied_boxes=occupied_boxes,
+            page_width=page_width,
+            page_height=page_height,
+        )
 
         equation_items.append(MediaItem(bbox=bbox, kind="equation", page=page_number))
         consumed_ids.update(group_ids)
@@ -807,9 +900,11 @@ def parse_pdf(file_path: Path, asset_dir: Path, document_id: str) -> list[Block]
             used_caption_ids.add(caption_item.id)
 
         equation_media_items, equation_item_ids = detect_equation_media_items(
+            page=page,
             text_items=text_items,
             occupied_boxes=occupied_boxes,
             page_width=page_width,
+            page_height=page_height,
             page_number=page_number,
         )
         media_items.extend(equation_media_items)

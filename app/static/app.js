@@ -125,6 +125,56 @@ function getActiveDocument() {
   return state.documents.find((item) => item.id === state.activeDocumentId) || null;
 }
 
+function defaultTranslationFileName(document) {
+  const sourceName = document?.name || "document";
+  const dotIndex = sourceName.lastIndexOf(".");
+  const stem = dotIndex > 0 ? sourceName.slice(0, dotIndex) : sourceName;
+  return `${stem}.translated.txt`;
+}
+
+function parseDownloadFileName(disposition, fallbackName) {
+  if (!disposition) return fallbackName;
+
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return fallbackName;
+    }
+  }
+
+  const basicMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  if (basicMatch) {
+    return basicMatch[1];
+  }
+
+  return fallbackName;
+}
+
+async function saveBlobWithPicker(blob, suggestedName) {
+  if (!("showSaveFilePicker" in window) || !window.isSecureContext) {
+    return false;
+  }
+
+  const handle = await window.showSaveFilePicker({
+    suggestedName,
+    types: [
+      {
+        description: "Text Files",
+        accept: {
+          "text/plain": [".txt"],
+        },
+      },
+    ],
+  });
+
+  const writable = await handle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+  return true;
+}
+
 function updateDocumentList() {
   documentList.innerHTML = "";
   docCount.textContent = String(state.documents.length);
@@ -246,16 +296,41 @@ async function deleteActiveDocument() {
   await loadDocuments();
 }
 
-function downloadActiveTranslation() {
+async function downloadActiveTranslation() {
   const activeDocument = getActiveDocument();
   if (!activeDocument || !hasTranslatedContent(activeDocument)) return;
 
+  const response = await fetch(`/api/documents/${activeDocument.id}/translation.txt`);
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || "Unable to download translation.");
+  }
+
+  const blob = await response.blob();
+  const fallbackName = defaultTranslationFileName(activeDocument);
+  const fileName = parseDownloadFileName(response.headers.get("Content-Disposition"), fallbackName);
+
+  try {
+    const saved = await saveBlobWithPicker(blob, fileName);
+    if (saved) {
+      return;
+    }
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return;
+    }
+    throw error;
+  }
+
+  const blobUrl = URL.createObjectURL(blob);
   const link = window.document.createElement("a");
-  link.href = `/api/documents/${activeDocument.id}/translation.txt`;
+  link.href = blobUrl;
+  link.download = fileName;
   link.rel = "noopener";
   window.document.body.appendChild(link);
   link.click();
   link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }
 
 async function refreshActiveDocument() {
@@ -341,9 +416,9 @@ translateButton.addEventListener("click", async () => {
   }
 });
 
-downloadButton.addEventListener("click", () => {
+downloadButton.addEventListener("click", async () => {
   try {
-    downloadActiveTranslation();
+    await downloadActiveTranslation();
   } catch (error) {
     errorText.textContent = error.message;
   }
